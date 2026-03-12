@@ -2,85 +2,39 @@ package mysqldump
 
 import (
 	"database/sql"
-	"errors"
+	"fmt"
 	"io"
-	"os"
-	"path"
-	"time"
+
+	"github.com/go-sql-driver/mysql"
 )
 
-/*
-Register a new dumper.
-
-	db: Database that will be dumped (https://golang.org/pkg/database/sql/#DB).
-	dir: Path to the directory where the dumps will be stored.
-	format: Format to be used to name each dump file. Uses time.Time.Format (https://golang.org/pkg/time/#Time.Format). format appended with '.sql'.
-*/
-func Register(db *sql.DB, dir, format string) (*Data, error) {
-	if !isDir(dir) {
-		return nil, errors.New("Invalid directory")
-	}
-
-	name := time.Now().Format(format)
-	p := path.Join(dir, name+".sql")
-
-	// Check dump directory
-	if e, _ := exists(p); e {
-		return nil, errors.New("Dump '" + name + "' already exists.")
-	}
-
-	// Create .sql file
-	f, err := os.Create(p)
-
-	if err != nil {
-		return nil, err
-	}
-
+// Init initializes a new dumper.
+// config: configuration of the MySQL database that will be dumped.
+// opts: options for filtering tables and configuring the dump process.
+func Init(config mysql.Config, opts TableOptions) (*Data, error) {
 	return &Data{
-		Out:        f,
-		Connection: db,
+		Opts:   opts,
+		Config: config,
 	}, nil
 }
 
-// Dump Creates a MYSQL dump from the connection to the stream.
-func Dump(db *sql.DB, out io.Writer) error {
-	return (&Data{
-		Connection: db,
-		Out:        out,
-	}).Dump()
-}
+// MakeDump performs the full database dump process.
+// It opens a new connection to the database using the provided configuration,
+// and streams the data to the provided io.Writer.
+func (data *Data) MakeDump(out io.Writer) error {
+	if data.Connection == nil {
+		db, err := sql.Open("mysql", data.Config.FormatDSN())
+		if err != nil {
+			return fmt.Errorf("error opening database: %w", err)
+		}
+		defer db.Close()
+		data.Connection = db
+	}
 
-// Close the dumper.
-// Will also close the database the dumper is connected to as well as the out stream if it has a Close method.
-//
-// Not required.
-func (data *Data) Close() error {
+	data.Out = out
 	defer func() {
-		data.Connection = nil
 		data.Out = nil
 	}()
-	if out, ok := data.Out.(io.Closer); ok {
-		out.Close()
-	}
-	return data.Connection.Close()
-}
 
-func exists(p string) (bool, os.FileInfo) {
-	f, err := os.Open(p)
-	if err != nil {
-		return false, nil
-	}
-	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
-		return false, nil
-	}
-	return true, fi
-}
-
-func isDir(p string) bool {
-	if e, fi := exists(p); e {
-		return fi.Mode().IsDir()
-	}
-	return false
+	return data.dump()
 }

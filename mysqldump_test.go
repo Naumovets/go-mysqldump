@@ -2,13 +2,14 @@ package mysqldump_test
 
 import (
 	"bytes"
-	"io/ioutil"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
-	"github.com/jamf/go-mysqldump"
+	"github.com/Naumovets/go-mysqldump"
+	"github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -93,8 +94,10 @@ func RunDump(t testing.TB, data *mysqldump.Data) {
 	defer db.Close()
 
 	data.Connection = db
-	showTablesRows := sqlmock.NewRowsWithColumnDefinition(c("Tables_in_Testdb", "")).
-		AddRow("Test_Table")
+	data.Opts.Schema = "Testdb"
+
+	showTablesRows := sqlmock.NewRows([]string{"table_name", "table_type"}).
+		AddRow("Test_Table", "BASE TABLE")
 
 	showColumnsRows := mockColumnRows()
 
@@ -110,78 +113,51 @@ func RunDump(t testing.TB, data *mysqldump.Data) {
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(`^SELECT version\(\)$`).WillReturnRows(serverVersionRows)
-	mock.ExpectQuery(`^SHOW TABLES$`).WillReturnRows(showTablesRows)
-	mock.ExpectExec("^LOCK TABLES `Test_Table` READ /\\*!32311 LOCAL \\*/$").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery("^SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = 'Testdb'").WillReturnRows(showTablesRows)
+	if data.Opts.LockTables {
+		mock.ExpectExec("^LOCK TABLES `Test_Table` READ /\\*!32311 LOCAL \\*/$").WillReturnResult(sqlmock.NewResult(1, 1))
+	}
 	mock.ExpectQuery("^SHOW CREATE TABLE `Test_Table`$").WillReturnRows(createTableRows)
 	mock.ExpectQuery("^SHOW COLUMNS FROM `Test_Table`$").WillReturnRows(showColumnsRows)
 	mock.ExpectQuery("^SELECT (.+) FROM `Test_Table`$").WillReturnRows(createTableValueRows)
 	mock.ExpectRollback()
 
-	assert.NoError(t, data.Dump(), "an error was not expected when dumping a stub database connection")
+	assert.NoError(t, data.MakeDump(data.Out), "an error was not expected when dumping a stub database connection")
 }
 
-func TestDumpOk(t *testing.T) {
+func TestInit(t *testing.T) {
+	config := mysql.Config{User: "test"}
+	opts := mysqldump.TableOptions{Schema: "db"}
+
+	dumper, err := mysqldump.Init(config, opts)
+	assert.NoError(t, err)
+	assert.Equal(t, "test", dumper.Config.User)
+	assert.Equal(t, "db", dumper.Opts.Schema)
+}
+
+func TestMakeDump(t *testing.T) {
 	var buf bytes.Buffer
+	config := mysql.Config{User: "test"}
+	opts := mysqldump.TableOptions{LockTables: true}
 
-	RunDump(t, &mysqldump.Data{
-		Out:        &buf,
-		LockTables: true,
-	})
+	dumper, _ := mysqldump.Init(config, opts)
+	dumper.Out = &buf
 
-	result := strings.Replace(strings.Split(buf.String(), "-- Dump completed")[0], "`", "~", -1)
+	RunDump(t, dumper)
 
-	assert.Equal(t, expected, result)
+	result := strings.ReplaceAll(strings.Split(buf.String(), "-- Dump completed")[0], "`", "~")
+	expectedTrimmed := strings.ReplaceAll(strings.Split(expected, "-- Dump completed")[0], "`", "~")
+
+	assert.Equal(t, expectedTrimmed, result)
 }
 
-func TestNoLockOk(t *testing.T) {
-	var buf bytes.Buffer
+func BenchmarkMakeDump(b *testing.B) {
+	config := mysql.Config{}
+	opts := mysqldump.TableOptions{LockTables: true}
+	dumper, _ := mysqldump.Init(config, opts)
+	dumper.Out = io.Discard
 
-	data := &mysqldump.Data{
-		Out:        &buf,
-		LockTables: false,
-	}
-
-	db, mock, err := sqlmock.New()
-	assert.NoError(t, err, "an error was not expected when opening a stub database connection")
-	defer db.Close()
-
-	data.Connection = db
-	showTablesRows := sqlmock.NewRowsWithColumnDefinition(c("Tables_in_Testdb", "")).
-		AddRow("Test_Table")
-
-	showColumnsRows := mockColumnRows()
-
-	serverVersionRows := sqlmock.NewRowsWithColumnDefinition(c("Version()", "")).
-		AddRow("test_version")
-
-	createTableRows := sqlmock.NewRowsWithColumnDefinition(c("Table", ""), c("Create Table", "")).
-		AddRow("Test_Table", "CREATE TABLE 'Test_Table' (`id` int(11) NOT NULL AUTO_INCREMENT,`email` char(60) DEFAULT NULL, `name` char(60), PRIMARY KEY (`id`))ENGINE=InnoDB DEFAULT CHARSET=latin1")
-
-	createTableValueRows := sqlmock.NewRowsWithColumnDefinition(c("id", 0), c("email", ""), c("name", "")).
-		AddRow(1, nil, "Test Name 1").
-		AddRow(2, "test2@test.de", "Test Name 2")
-
-	mock.ExpectBegin()
-	mock.ExpectQuery(`^SELECT version\(\)$`).WillReturnRows(serverVersionRows)
-	mock.ExpectQuery(`^SHOW TABLES$`).WillReturnRows(showTablesRows)
-	mock.ExpectQuery("^SHOW CREATE TABLE `Test_Table`$").WillReturnRows(createTableRows)
-	mock.ExpectQuery("^SHOW COLUMNS FROM `Test_Table`$").WillReturnRows(showColumnsRows)
-	mock.ExpectQuery("^SELECT (.+) FROM `Test_Table`$").WillReturnRows(createTableValueRows)
-	mock.ExpectRollback()
-
-	assert.NoError(t, data.Dump(), "an error was not expected when dumping a stub database connection")
-
-	result := strings.Replace(strings.Split(buf.String(), "-- Dump completed")[0], "`", "~", -1)
-
-	assert.Equal(t, expected, result)
-}
-
-func BenchmarkDump(b *testing.B) {
-	data := &mysqldump.Data{
-		Out:        ioutil.Discard,
-		LockTables: true,
-	}
 	for i := 0; i < b.N; i++ {
-		RunDump(b, data)
+		RunDump(b, dumper)
 	}
 }
