@@ -14,3 +14,9 @@ require (
 )
 
 go 1.24.1
+
+// Source - https://translated.turbopages.orghttps://translated.turbopages.org/proxy_u/en-ru.ru.37b69f09-69b42d95-cf442d3a-74722d776562/https/stackoverflow.com/a
+// Posted by Shailesh Suryawanshi, modified by community. See post 'Timeline' for change history
+// Retrieved 2026-03-13, License - CC BY-SA 4.0
+
+retract v1.0.0
