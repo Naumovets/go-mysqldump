@@ -94,7 +94,6 @@ func RunDump(t testing.TB, data *mysqldump.Data) {
 	defer db.Close()
 
 	data.Connection = db
-	data.Opts.Schema = "Testdb"
 
 	showTablesRows := sqlmock.NewRows([]string{"table_name", "table_type"}).
 		AddRow("Test_Table", "BASE TABLE")
@@ -113,7 +112,7 @@ func RunDump(t testing.TB, data *mysqldump.Data) {
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(`^SELECT version\(\)$`).WillReturnRows(serverVersionRows)
-	mock.ExpectQuery("^SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = 'Testdb'").WillReturnRows(showTablesRows)
+	mock.ExpectQuery("^SHOW FULL TABLES WHERE Tables_in_ LIKE '%%'$").WillReturnRows(showTablesRows)
 	if data.Opts.LockTables {
 		mock.ExpectExec("^LOCK TABLES `Test_Table` READ /\\*!32311 LOCAL \\*/$").WillReturnResult(sqlmock.NewResult(1, 1))
 	}
@@ -127,12 +126,11 @@ func RunDump(t testing.TB, data *mysqldump.Data) {
 
 func TestInit(t *testing.T) {
 	config := mysql.Config{User: "test"}
-	opts := mysqldump.TableOptions{Schema: "db"}
+	opts := mysqldump.TableOptions{}
 
 	dumper, err := mysqldump.Init(config, opts)
 	assert.NoError(t, err)
 	assert.Equal(t, "test", dumper.Config.User)
-	assert.Equal(t, "db", dumper.Opts.Schema)
 }
 
 func TestMakeDump(t *testing.T) {

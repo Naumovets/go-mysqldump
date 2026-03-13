@@ -47,13 +47,11 @@ func TestGetTablesOk(t *testing.T) {
 	data, mock, err := getMockData()
 	assert.NoError(t, err, "an error was not expected when opening a stub database connection")
 
-	data.Opts.Schema = "Testdb"
-
-	rows := sqlmock.NewRows([]string{"table_name", "table_type"}).
+	rows := sqlmock.NewRows([]string{"Tables_in_", "Table_type"}).
 		AddRow("Test_Table_1", "BASE TABLE").
 		AddRow("Test_Table_2", "BASE TABLE")
 
-	mock.ExpectQuery("^SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = 'Testdb' AND table_name LIKE '%%'$").WillReturnRows(rows)
+	mock.ExpectQuery("^SHOW FULL TABLES WHERE Tables_in_ LIKE '%%'$").WillReturnRows(rows)
 
 	result, err := data.getTables()
 	assert.NoError(t, err)
@@ -69,14 +67,13 @@ func TestIgnoreTablesOk(t *testing.T) {
 	data, mock, err := getMockData()
 	assert.NoError(t, err, "an error was not expected when opening a stub database connection")
 
-	data.Opts.Schema = "Testdb"
 	data.Opts.IgnoreTables = []string{"Test_Table_1"}
 
-	rows := sqlmock.NewRows([]string{"table_name", "table_type"}).
+	rows := sqlmock.NewRows([]string{"Tables_in_", "Table_type"}).
 		AddRow("Test_Table_1", "BASE TABLE").
 		AddRow("Test_Table_2", "BASE TABLE")
 
-	mock.ExpectQuery("^SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = 'Testdb' AND table_name LIKE '%%'$").WillReturnRows(rows)
+	mock.ExpectQuery("^SHOW FULL TABLES WHERE Tables_in_ LIKE '%%'$").WillReturnRows(rows)
 
 	result, err := data.getTables()
 	assert.NoError(t, err)
@@ -91,14 +88,13 @@ func TestGetTablesWithPrefix(t *testing.T) {
 	data, mock, err := getMockData()
 	assert.NoError(t, err)
 
-	data.Opts.Schema = "Testdb"
 	data.Opts.TablePrefix = "wp_"
 
-	rows := sqlmock.NewRows([]string{"table_name", "table_type"}).
+	rows := sqlmock.NewRows([]string{"Tables_in_", "Table_type"}).
 		AddRow("wp_posts", "BASE TABLE").
 		AddRow("wp_users", "BASE TABLE")
 
-	mock.ExpectQuery("^SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = 'Testdb' AND table_name LIKE 'wp_%%'$").WillReturnRows(rows)
+	mock.ExpectQuery("^SHOW FULL TABLES WHERE Tables_in_ LIKE 'wp_%%'$").WillReturnRows(rows)
 
 	result, err := data.getTables()
 	assert.NoError(t, err)
@@ -112,13 +108,12 @@ func TestGetTablesWithSuffix(t *testing.T) {
 	data, mock, err := getMockData()
 	assert.NoError(t, err)
 
-	data.Opts.Schema = "Testdb"
 	data.Opts.TableSuffix = "_backup"
 
-	rows := sqlmock.NewRows([]string{"table_name", "table_type"}).
+	rows := sqlmock.NewRows([]string{"Tables_in_", "Table_type"}).
 		AddRow("users_backup", "BASE TABLE")
 
-	mock.ExpectQuery("^SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = 'Testdb' AND table_name LIKE '%%_backup'$").WillReturnRows(rows)
+	mock.ExpectQuery("^SHOW FULL TABLES WHERE Tables_in_ LIKE '%%_backup'$").WillReturnRows(rows)
 
 	result, err := data.getTables()
 	assert.NoError(t, err)
@@ -131,14 +126,13 @@ func TestGetTablesWithPrefixAndSuffix(t *testing.T) {
 	data, mock, err := getMockData()
 	assert.NoError(t, err)
 
-	data.Opts.Schema = "Testdb"
 	data.Opts.TablePrefix = "pre_"
 	data.Opts.TableSuffix = "_post"
 
-	rows := sqlmock.NewRows([]string{"table_name", "table_type"}).
+	rows := sqlmock.NewRows([]string{"Tables_in_", "Table_type"}).
 		AddRow("pre_data_post", "BASE TABLE")
 
-	mock.ExpectQuery("^SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = 'Testdb' AND table_name LIKE 'pre_%%_post'$").WillReturnRows(rows)
+	mock.ExpectQuery("^SHOW FULL TABLES WHERE Tables_in_ LIKE 'pre_%%_post'$").WillReturnRows(rows)
 
 	result, err := data.getTables()
 	assert.NoError(t, err)
@@ -153,18 +147,17 @@ func TestGetTablesComprehensiveFiltering(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Настраиваем жесткие фильтры
-	data.Opts.Schema = "TargetDB"
 	data.Opts.TablePrefix = "prod_"
 	data.Opts.IgnoreTables = []string{"prod_secret"}
 
 	// Имитируем ситуацию: в БД есть много таблиц, но SQL-запрос должен ограничить их
 	// Мы проверяем, что SQL-запрос содержит правильный WHERE
-	rows := sqlmock.NewRows([]string{"table_name", "table_type"}).
+	rows := sqlmock.NewRows([]string{"Tables_in_", "Table_type"}).
 		AddRow("prod_users", "BASE TABLE").
 		AddRow("prod_secret", "BASE TABLE") // Эту таблицу мы проигнорируем в Go
 
-	// Регулярное выражение проверяет, что мы ищем именно в TargetDB и с нужным префиксом
-	mock.ExpectQuery("WHERE table_schema = 'TargetDB' AND table_name LIKE 'prod_%%'").WillReturnRows(rows)
+	// Регулярное выражение проверяет, что мы ищем именно в текущей БД и с нужным префиксом
+	mock.ExpectQuery("^SHOW FULL TABLES WHERE Tables_in_ LIKE 'prod_%%'$").WillReturnRows(rows)
 
 	result, err := data.getTables()
 	assert.NoError(t, err)
@@ -184,11 +177,9 @@ func TestGetTablesNoMatches(t *testing.T) {
 	data, mock, err := getMockData()
 	assert.NoError(t, err)
 
-	data.Opts.Schema = "EmptyDB"
-
 	// База ничего не вернула
-	rows := sqlmock.NewRows([]string{"table_name", "table_type"})
-	mock.ExpectQuery("WHERE table_schema = 'EmptyDB'").WillReturnRows(rows)
+	rows := sqlmock.NewRows([]string{"Tables_in_", "Table_type"})
+	mock.ExpectQuery("^SHOW FULL TABLES WHERE Tables_in_ LIKE '%%'$").WillReturnRows(rows)
 
 	result, err := data.getTables()
 	assert.NoError(t, err)

@@ -16,7 +16,6 @@ import (
 )
 
 type TableOptions struct {
-	Schema           string
 	TableSuffix      string
 	TablePrefix      string
 	IgnoreTables     []string
@@ -56,7 +55,7 @@ type table struct {
 	cols   []string
 	data   *Data
 	rows   *sql.Rows
-	values []interface{}
+	values []any
 }
 
 type metaData struct {
@@ -153,28 +152,28 @@ func (data *Data) dump() error {
 	}
 
 	if err := data.getTemplates(); err != nil {
-		return err
+		return fmt.Errorf("cannot get templates: %v", err)
 	}
 
 	// Start the read only transaction and defer the rollback until the end
 	// This way the database will have the exact state it did at the beginning of
 	// the backup and nothing can be accidentally committed
 	if err := data.begin(); err != nil {
-		return err
+		return fmt.Errorf("cannot begin transaction: %v", err)
 	}
 	defer data.rollback()
 
 	if err := meta.updateServerVersion(data); err != nil {
-		return err
+		return fmt.Errorf("cannot update server version: %v", err)
 	}
 
 	if err := data.headerTmpl.Execute(data.Out, meta); err != nil {
-		return err
+		return fmt.Errorf("cannot header template execute: %v", err)
 	}
 
 	tables, err := data.getTables()
 	if err != nil {
-		return err
+		return fmt.Errorf("cannot get tables: %v", err)
 	}
 
 	// Lock all tables before dumping if present
@@ -189,7 +188,7 @@ func (data *Data) dump() error {
 		}
 
 		if _, err := data.Connection.Exec(b.String()); err != nil {
-			return err
+			return fmt.Errorf("cannot exec: %v", err)
 		}
 
 		defer data.Connection.Exec("UNLOCK TABLES")
@@ -197,7 +196,8 @@ func (data *Data) dump() error {
 
 	for _, table := range tables {
 		if err := data.dumpTable(table); err != nil {
-			return err
+
+			return fmt.Errorf("cannot dump table: %v", err)
 		}
 	}
 
@@ -230,19 +230,20 @@ func (data *Data) rollback() error {
 
 func (data *Data) dumpTable(table *table) error {
 	if data.err != nil {
-		return data.err
+		return fmt.Errorf("data error exist: %v", data.err)
 	}
+
 	return data.writeTable(table)
 }
 
 func (data *Data) writeTable(table *table) error {
 	if table.isView {
 		if err := data.viewTmpl.Execute(data.Out, table); err != nil {
-			return err
+			return fmt.Errorf("cannot view execute: %v", err)
 		}
 	} else {
 		if err := data.tableTmpl.Execute(data.Out, table); err != nil {
-			return err
+			return fmt.Errorf("cannot table execute: %v", err)
 		}
 	}
 	return table.Err
@@ -278,12 +279,9 @@ func (data *Data) getTables() ([]*table, error) {
 	tables := make([]*table, 0)
 	var query string
 
-	if len(data.Opts.Schema) != 0 {
-		query = fmt.Sprintf("SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = '%s' AND table_name LIKE '%s'", data.Opts.Schema, (data.Opts.TablePrefix + "%%" + data.Opts.TableSuffix))
-	} else {
-		query = fmt.Sprintf("SELECT table_name, table_type FROM information_schema.tables WHERE table_name LIKE '%s'", (data.Opts.TablePrefix + "%%" + data.Opts.TableSuffix))
+	tableName := fmt.Sprintf("Tables_in_%s", data.Config.DBName)
 
-	}
+	query = fmt.Sprintf("SHOW FULL TABLES WHERE %s LIKE '%s'", tableName, (data.Opts.TablePrefix + "%%" + data.Opts.TableSuffix))
 
 	rows, err := data.tx.Query(query)
 	if err != nil {
@@ -475,7 +473,7 @@ func reflectColumnType(tp *sql.ColumnType) reflect.Type {
 	switch tp.DatabaseTypeName() {
 	case "BLOB", "BINARY":
 		return reflect.TypeOf(sql.RawBytes{})
-	case "VARCHAR", "TEXT", "DECIMAL", "JSON":
+	case "VARCHAR", "TEXT", "DECIMAL", "JSON", "DATETIME", "DATE", "TIMESTAMP":
 		return reflect.TypeOf(sql.NullString{})
 	case "BIGINT", "TINYINT", "INT":
 		return reflect.TypeOf(sql.NullInt64{})
