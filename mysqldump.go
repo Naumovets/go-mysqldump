@@ -29,6 +29,9 @@ func (data *Data) MakeDump(out io.Writer) error {
 		}
 		defer db.Close()
 		data.Connection = db
+		defer func() {
+			data.Connection = nil
+		}()
 	}
 
 	data.Out = out
