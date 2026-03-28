@@ -19,4 +19,6 @@ go 1.24.1
 // Posted by Shailesh Suryawanshi, modified by community. See post 'Timeline' for change history
 // Retrieved 2026-03-13, License - CC BY-SA 4.0
 
-retract v1.0.0
+retract (
+	[v1.0.0, v1.0.1]
+)
